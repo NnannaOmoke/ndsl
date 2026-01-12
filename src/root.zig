@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 
 comptime {
     _ = @import("array_list.zig");
-    std.testing.refAllDecls(@This());
+    _ = @import("stack.zig");
+    std.testing.refAllDeclsRecursive(@This());
 }
 
 // test {}

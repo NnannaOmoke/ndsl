@@ -99,7 +99,11 @@ pub fn ArrayList(comptime T: type) type {
         /// Delete an element at some point in the array
         pub fn deleteAt(self: *Self, pos: usize) RootError!T {
             if (self.checkOOB(pos)) return RootError.OutOfBounds;
-            // right shift
+            return self.deleteAtUnchecked(pos);
+        }
+
+        /// Delete an element at some point in the array, while verifying that `pos` is in the array
+        pub fn deleteAtUnchecked(self: *Self, pos: usize) T {
             const result = self.backing[pos];
             @memmove(self.backing[pos .. self.occupied - 1], self.backing[pos + 1 .. self.occupied]);
             self.occupied -= 1;
@@ -109,6 +113,11 @@ pub fn ArrayList(comptime T: type) type {
         /// Get an element situated at index `pos`
         pub fn get(self: *Self, pos: usize) ?T {
             if (self.checkOOB(pos)) return null;
+            return self.getUnchecked(pos);
+        }
+
+        /// Get an element, having previously verified that `pos` is not out of bounds
+        pub fn getUnchecked(self: *Self, pos: usize) T {
             return self.backing[pos];
         }
 
@@ -116,12 +125,28 @@ pub fn ArrayList(comptime T: type) type {
         // NOTE: This operation is very unsafe -- some careless developer could free this pointer, leading to UB
         pub fn getPointer(self: *Self, pos: usize) ?*T {
             if (self.checkOOB(pos)) return null;
+            return self.getPointerUnchecked(pos);
+        }
+
+        /// Get a reference to the element situtatued at index pos, having previously verified that `pos` is not out of bounds
+        pub fn getPointerUnchecked(self: *Self, pos: usize) *T {
             return &self.backing[pos];
         }
 
+        /// Deinitialize the `ArrayList`
         pub fn deinit(self: *Self, allocator: Allocator) void {
             allocator.free(self.backing);
             self.occupied = 0;
+        }
+
+        /// Return the number of elements in the array
+        pub inline fn len(self: *Self) usize {
+            return self.occupied;
+        }
+
+        /// Return the capacity of the array
+        pub inline fn capacity(self: *Self) usize {
+            return self.backing.len;
         }
 
         /// Check whether some index is out of bounds in the current array-list
