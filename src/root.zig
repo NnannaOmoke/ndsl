@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 comptime {
     _ = @import("array_list.zig");
     _ = @import("stack.zig");
+    _ = @import("queue.zig");
     std.testing.refAllDeclsRecursive(@This());
 }
 

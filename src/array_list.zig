@@ -1,6 +1,7 @@
 //! This represents functionality for the operation of a simple array list
 
 const std = @import("std");
+const PLATFORM_MAX = std.math.maxInt;
 const root = @import("root.zig");
 const testing = std.testing;
 const debug_print = std.debug.print;
@@ -155,8 +156,16 @@ pub fn ArrayList(comptime T: type) type {
         }
 
         /// In response to exceeding capacity, potentially reallocate or resize the memory
-        fn resizeUp(self: *Self, new_len: usize, allocator: Allocator) Allocator.Error!void {
+        fn resizeUp(self: *Self, size_hint: usize, allocator: Allocator) Allocator.Error!void {
             // reallocation path
+            const new_len = blk: {
+                if (size_hint > (MULTIPLIER_FACTOR * self.backing.len) + 1) {
+                    //i.e. a slice allocation, the new_len should be `multiplier_factor` * new_len + 1
+                    break :blk size_hint * MULTIPLIER_FACTOR + 1;
+                } else {
+                    break :blk size_hint;
+                }
+            };
             if (allocator.remap(self.backing, new_len)) |slice| {
                 self.backing = slice;
             } else {
