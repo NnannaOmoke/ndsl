@@ -777,10 +777,115 @@ test "resize with sufficient wasted space avoids allocation" {
     try testing.expectEqual(backing_ptr, queue.backing.ptr);
 }
 
-// /// Returns a ring buffer of type `T` and capacity `cap`
-// pub fn RingBuffer(
-//     comptime T: type,
-//     cap: usize,
-// ) type {
-//     return struct {};
-// }
+// TODO: add extension struct called `VecDeque` that allows to pop from head and push to front
+/// Returns a growable ring buffer of type `T`
+/// This is analogous to rust's `vecdeque`
+pub fn RingBuffer(
+    comptime T: type,
+) type {
+    return struct {
+        const Self = @This();
+        backing: []T = &.{},
+        head: usize = 0,
+        len: usize = 0,
+
+        const empty = Self{};
+
+        /// Initialize a ring buffer with the provided capacity
+        pub fn withInitCapacity(cap: usize, allocator: Allocator) Allocator.Error!Self {
+            const backing = try allocator.alloc(T, cap);
+            return Self{ .backing = backing };
+        }
+
+        /// Free the ring buffer and its backing memory
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            allocator.free(self.backing);
+            self.head = 0;
+            self.len = 0;
+        }
+
+        /// Push an element into the front of the ring buffer
+        pub fn enqueue(self: *Self, elem: T, allocator: Allocator) Allocator.Error!void {
+            if (self.len + 1 > self.backing.len) try self.resize(self.len + 1, allocator);
+            const index = self.head + self.len;
+            const pos = self.mask_or_mod_enqueue(index);
+            self.backing[pos] = elem;
+            self.len += 1;
+            return;
+        }
+
+        /// Push a slice into the front of the ring buffer
+        pub fn enqueueSlice(self: *Self, slice: []const T, allocator: Allocator) Allocator.Error!void {
+            if (self.len + slice.len > self.backing.len) try self.resize(self.len + slice.len, allocator);
+            // our issue is simple -- we must batch the copies into two
+            const start_pos = self.mask_or_mod_enqueue(self.head + self.len);
+            const diff = self.backing.len - start_pos;
+            if (slice.len > diff) {
+                const rem = slice.len - diff;
+                @memcpy(self.backing[start_pos..], slice[0..diff]);
+                @memcpy(self.backing[0..rem], slice[diff..][0..rem]);
+            } else {
+                @memcpy(self.backing[start_pos..][0..slice.len], slice);
+            }
+            self.len += slice.len;
+        }
+
+        /// Dequeue an element. This follows FIFO semantics
+        pub fn dequeue(self: *Self) ?T {
+            if (self.len == 0) return null;
+            const res = self.backing[self.head];
+            self.head += 1;
+            return res;
+        }
+
+        /// Peek the "head" of the ring buffer
+        pub fn peek(self: *Self) ?T {
+            if (self.len == 0) return null;
+            return self.backing[self.head];
+        }
+
+        /// Peek the "head" of the ring buffer, returning a reference
+        pub fn peekRef(self: *Self) ?*T {
+            if (self.len == 0) return null;
+            return &self.backing[self.head];
+        }
+
+        /// Resize the backing array for the allocator
+        /// The size hint is usually aligned forward to the next power of eight to make `mask_or_mod_enqueue` cheaper
+        fn resize(self: *Self, size_hint: usize, allocator: Allocator) Allocator.Error!void {
+            // all size hints are multiplied by 2 and aligned forward or backward to the next power of eight.
+            const mul_two = size_hint * 2;
+            const forward = (mul_two + 7) & ~(7); //hopefull aligns forward to the next power of eight
+            // TODO: Make this safe for overflow semantics. On most platforms, the process will die before overflow needs to be a problem
+            if (allocator.remap(self.backing, forward)) |new_slice| {
+                const tail = self.backing.len - self.head;
+                const wrap_around_len = self.len -| tail;
+                @memcpy(new_slice[0..tail], self.backing[self.head..]);
+                @memcpy(new_slice[tail..][0..wrap_around_len], self.backing[0..wrap_around_len]);
+                self.backing = new_slice;
+            } else {
+                const new_slice = try allocator.alloc(T, forward);
+                const tail = self.backing.len - self.head;
+                const wrap_around_len = self.len -| tail;
+                @memcpy(new_slice[0..tail], self.backing[self.head..]);
+                @memcpy(new_slice[tail..][0..wrap_around_len], self.backing[0..wrap_around_len]);
+                allocator.free(self.backing);
+                self.backing = new_slice;
+            }
+            self.head = 0;
+            return;
+        }
+
+        /// Function provides the index for the next insert
+        inline fn mask_or_mod_enqueue(self: *Self, index: usize) usize {
+            const cap = self.backing.len;
+            if (cap & (cap - 1) == 0) {
+                @branchHint(.likely);
+                return index & (cap - 1);
+            } else {
+                @branchHint(.unlikely);
+                return index % cap;
+            }
+        }
+    };
+}
